@@ -1,0 +1,156 @@
+import streamlit as st
+import mysql.connector
+import pandas as pd
+import plotly.express as px
+
+
+st.title("IMDB 2024 Data Scraping and Visualizations")
+
+st.image("C:/Users/Mogeeth.M/Downloads/imdb bro.webp")
+# Database connection function
+def get_connection():
+    return mysql.connector.connect(
+        host="localhost",
+        user="root",
+        password="",
+        database="Thaladatabase",
+    )
+
+# Streamlit UI
+st.title("IMDB 2024 Data Scraping and Visualizations")
+st.sidebar.title("Navigation")
+
+# Sidebar options
+option = st.sidebar.selectbox(
+    "Select an analysis",
+    [
+        "Top-Rated Movies", "Genre Analysis", "Duration Insights", "Voting Patterns", 
+        "Popular Genres", "Rating Distribution", "Genre vs. Ratings", "Duration Extremes", 
+        "Top-Voted Movies", "Interactive Filtering"
+    ]
+)
+
+def fetch_data(query):
+    conn = get_connection()
+    df = pd.read_sql(query, conn)
+    conn.close()
+    return df
+
+if option == "Top-Rated Movies":
+    query = """
+    SELECT Title, Rating, Voting, Duration_seconds, Genre 
+    FROM imdb 
+    WHERE Voting IS NOT NULL AND Rating IS NOT NULL 
+    ORDER BY Rating DESC, Voting DESC 
+    LIMIT 10;
+    """
+    df = fetch_data(query)
+    st.subheader("Top 10 Movies by Rating and Voting Counts")
+    st.dataframe(df)
+    fig = px.bar(df, x="Title", y="Rating", text="Voting", color="Genre", title="Top 10 Movies by Rating")
+    st.plotly_chart(fig)
+    fig2 = px.bar(df, x="Title", y="Voting", text="Rating", color="Genre", title="Top 10 Movies by Voting Counts")
+    st.plotly_chart(fig2)
+
+elif option == "Genre Analysis":
+    query = """
+    SELECT Genre, COUNT(*) AS Genre_Count FROM imdb WHERE Genre IS NOT NULL 
+    GROUP BY Genre ORDER BY Genre_Count DESC;
+    """
+    df = fetch_data(query)
+    st.subheader("Distribution of Movie Genres in 2024")
+    st.dataframe(df)
+    fig = px.bar(df, x="Genre", y="Genre_Count", title="Distribution of Movie Genres", color="Genre")
+    st.plotly_chart(fig)
+
+elif option == "Duration Insights":
+    query = """
+    SELECT Genre, AVG(Duration_seconds) AS Average_Duration FROM imdb WHERE Genre IS NOT NULL 
+    GROUP BY Genre ORDER BY Average_Duration DESC;
+    """
+    df = fetch_data(query)
+    st.subheader("Average Duration of Movies Across Genres")
+    st.dataframe(df)
+    fig = px.bar(df, x="Genre", y="Average_Duration", title="Average Movie Duration by Genre", color="Genre")
+    st.plotly_chart(fig)
+
+elif option == "Voting Patterns":
+    query = """
+    SELECT Genre, AVG(Voting) AS Avg_Voting FROM imdb WHERE Genre IS NOT NULL 
+    GROUP BY Genre ORDER BY Avg_Voting DESC;
+    """
+    df = fetch_data(query)
+    st.subheader("Genres with the Highest Average Voting Counts")
+    st.dataframe(df)
+    fig = px.bar(df, x="Genre", y="Avg_Voting", title="Average Voting Counts per Genre", color="Genre")
+    st.plotly_chart(fig)
+
+elif option == "Popular Genres":
+    query = """
+    SELECT Genre, COUNT(*) AS Genre_Count FROM imdb WHERE Genre IS NOT NULL 
+    GROUP BY Genre ORDER BY Genre_Count DESC;
+    """
+    df = fetch_data(query)
+    st.subheader("Dominant Genres in IMDb 2024")
+    st.dataframe(df)
+    fig = px.bar(df, x="Genre", y="Genre_Count", title="Popular Genres in IMDb 2024", color="Genre")
+    st.plotly_chart(fig)
+
+elif option == "Rating Distribution":
+    query = "SELECT Rating FROM imdb WHERE Rating IS NOT NULL ORDER BY Rating DESC;"
+    df = fetch_data(query)
+    st.subheader("Distribution of Ratings Across Movies")
+    st.dataframe(df)
+    fig = px.histogram(df, x="Rating", nbins=20, title="Movie Ratings Distribution")
+    st.plotly_chart(fig)
+
+elif option == "Genre vs. Ratings":
+    query = """
+    SELECT Genre, AVG(Rating) AS Average_Rating FROM imdb WHERE Genre IS NOT NULL 
+    GROUP BY Genre ORDER BY Average_Rating DESC;
+    """
+    df = fetch_data(query)
+    st.subheader("Average Ratings for Each Genre")
+    st.dataframe(df)
+    fig = px.bar(df, x="Genre", y="Average_Rating", title="Genre vs. Ratings", color="Genre")
+    st.plotly_chart(fig)
+
+elif option == "Duration Extremes":
+    query_short = "SELECT Title, Duration_seconds FROM imdb WHERE Duration_seconds IS NOT NULL ORDER BY Duration_seconds ASC LIMIT 1;"
+    query_long = "SELECT Title, Duration_seconds FROM imdb WHERE Duration_seconds IS NOT NULL ORDER BY Duration_seconds DESC LIMIT 1;"
+    shortest_movie = fetch_data(query_short)
+    longest_movie = fetch_data(query_long)
+    st.subheader("Shortest and Longest Movies in 2024")
+    st.write("Shortest Movie:", shortest_movie)
+    st.write("Longest Movie:", longest_movie)
+
+elif option == "Top-Voted Movies":
+    query = """
+    SELECT Title, Voting, Genre FROM imdb WHERE Voting IS NOT NULL 
+    ORDER BY Voting DESC LIMIT 10;
+    """
+    df = fetch_data(query)
+    st.subheader("Top 10 Movies by Voting Counts")
+    st.dataframe(df)
+    fig = px.bar(df, x="Title", y="Voting", title="Top 10 Movies by Votes", color="Genre")
+    st.plotly_chart(fig)
+
+elif option == "Interactive Filtering":
+    st.subheader("Filter Movies by Ratings, Duration, Votes, and Genre")
+    rating_min, rating_max = st.slider("Rating Range", 0.0, 10.0, (0.0, 10.0))
+    duration_min, duration_max = st.slider("Duration (seconds)", 0, 6000, (0, 6000))
+    votes_min, votes_max = st.slider("Votes Range", 0, 1000000, (0, 1000000))
+    genre_filter = st.selectbox("Genre", ["", "Action", "Comedy", "Drama", "Horror", "Thriller", "Romance", "Sci-Fi", "Adventure", "Fantasy"])
+    query = f"""
+    SELECT Title, Rating, Voting, Duration_seconds, Genre FROM imdb WHERE 
+    Rating BETWEEN {rating_min} AND {rating_max} AND Duration_seconds BETWEEN {duration_min} AND {duration_max} 
+    AND Voting BETWEEN {votes_min} AND {votes_max} AND Genre LIKE '%{genre_filter}%' 
+    ORDER BY Rating DESC, Voting DESC;
+    """
+    df = fetch_data(query)
+    st.dataframe(df)
+    if not df.empty:
+        fig = px.bar(df, x="Title", y="Rating", title="Movies by Rating", color="Genre")
+        st.plotly_chart(fig)
+        fig2 = px.bar(df, x="Title", y="Voting", title="Movies by Voting Count", color="Genre")
+        st.plotly_chart(fig2)
