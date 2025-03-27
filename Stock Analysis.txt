@@ -1,0 +1,246 @@
+import mysql.connector
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import streamlit as st
+
+# Database Connection Function
+def get_connection():
+    try:
+        conn = mysql.connector.connect(
+            host="localhost",
+            port=3307,
+            user="root",
+            password="root",
+            database="combineddatabase"
+        )
+        return conn
+    except mysql.connector.Error as e:
+        st.error(f"Database connection failed: {e}")
+        return None
+
+# Fetch Data from MySQL for YAML Data Analysis
+def fetch_yaml_data():
+    conn = get_connection()
+    if conn is None:
+        return pd.DataFrame()
+
+    query = "SELECT Ticker, date, close, open FROM yaml_data"
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+
+    if df.empty:
+        st.warning("No data found in 'yaml_data' table.")
+        return df
+
+    df['date'] = pd.to_datetime(df['date'], errors='coerce')
+    df['close'] = pd.to_numeric(df['close'], errors='coerce')
+    df['open'] = pd.to_numeric(df['open'], errors='coerce')
+    df.dropna(subset=['date', 'close', 'open'], inplace=True)
+
+    return df
+
+# Fetch Data from MySQL for Cleared Data Analysis (Sector Performance)
+def fetch_cleared_data():
+    conn = get_connection()
+    if conn is None:
+        return pd.DataFrame()
+
+    query = """
+    SELECT Ticker, sector, date, open, close
+    FROM cleared_data;
+    """
+    df = pd.read_sql(query, conn)
+    conn.close()
+
+    if df.empty:
+        st.warning("No data found in 'cleared_data' table for Sector Performance.")
+        return df
+
+    df["date"] = pd.to_datetime(df["date"])
+    df["open"] = pd.to_numeric(df["open"], errors="coerce")
+    df["close"] = pd.to_numeric(df["close"], errors="coerce")
+    df.dropna(subset=['open', 'close', 'sector'], inplace=True)
+    return df
+
+# Calculate Volatility
+def calculate_volatility(df):
+    df.sort_values(by=['Ticker', 'date'], inplace=True)
+    df['Daily Return'] = df.groupby('Ticker')['close'].pct_change()
+    df.dropna(subset=['Daily Return'], inplace=True)
+    df['Volatility'] = df.groupby('Ticker')['Daily Return'].transform('std')
+    top_10_volatile = df[['Ticker', 'Volatility']].drop_duplicates().nlargest(10, 'Volatility')
+    return top_10_volatile
+
+# Plot Volatility
+def plot_volatility(top_10_volatile):
+    fig, ax = plt.subplots(figsize=(10, 5))
+    sns.barplot(x='Ticker', y='Volatility', data=top_10_volatile, palette='coolwarm', ax=ax)
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=45)
+    ax.set_title('Top 10 Most Volatile Stocks')
+    ax.set_xlabel('Stock')
+    ax.set_ylabel('Volatility (Std Dev of Daily Returns)')
+    st.pyplot(fig)
+    plt.close(fig)
+
+# Calculate Cumulative Return
+def calculate_cumulative_return(df):
+    df.sort_values(by=['Ticker', 'date'], inplace=True)
+    df['Daily Return'] = df.groupby('Ticker')['close'].pct_change()
+    df['Cumulative Return'] = df.groupby('Ticker')['Daily Return'].cumsum()
+    return df
+
+# Plot Cumulative Return
+def plot_cumulative_return(df):
+    cumulative_returns = df.pivot_table(index='date', columns='Ticker', values='Cumulative Return')
+
+    if cumulative_returns.empty:
+        st.warning("No cumulative return data to plot.")
+        return
+
+    top_5_tickers = cumulative_returns.iloc[-1].nlargest(5).index
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    for ticker in top_5_tickers:
+        ax.plot(cumulative_returns.index, cumulative_returns[ticker], label=ticker)
+
+    ax.set_title('Cumulative Return for Top 5 Performing Stocks')
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Cumulative Return')
+    ax.legend()
+    ax.grid(True)
+
+    st.pyplot(fig)
+    plt.close(fig)
+
+# Calculate Yearly Return and Sector Performance
+def calculate_sector_performance(df_cleared):
+    if df_cleared.empty:
+        return pd.DataFrame()
+
+    df_cleared["year"] = df_cleared["date"].dt.year
+    yearly_returns = df_cleared.groupby(["Ticker", "sector", "year"]).agg(
+        open_price=("open", "first"),
+        close_price=("close", "last")
+    ).reset_index()
+    yearly_returns["yearly_return"] = ((yearly_returns["close_price"] - yearly_returns["open_price"]) / yearly_returns["open_price"]) * 100
+    sector_performance = yearly_returns.groupby("sector")["yearly_return"].mean().reset_index()
+    return sector_performance
+
+# Plot Sector-wise Performance
+def plot_sector_performance(sector_performance):
+    if sector_performance.empty:
+        st.warning("No sector performance data to plot.")
+        return
+
+    plt.figure(figsize=(12, 6))
+    sns.barplot(x="sector", y="yearly_return", data=sector_performance, palette="viridis")
+    plt.xticks(rotation=90)
+    plt.xlabel("Sector")
+    plt.ylabel("Average Yearly Return (%)")
+    plt.title("Average Yearly Return by Sector")
+    plt.grid(axis="y", linestyle="--", alpha=0.7)
+    st.pyplot(plt.gcf())
+    plt.close()
+
+# Calculate Stock Price Correlation
+def calculate_stock_correlation(df):
+    price_pivot = df.pivot_table(index='date', columns='Ticker', values='close')
+    correlation_matrix = price_pivot.corr()
+    return correlation_matrix
+
+# Plot Stock Price Correlation Heatmap
+def plot_stock_correlation_heatmap(correlation_matrix):
+    fig, ax = plt.subplots(figsize=(12, 10))
+    sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', ax=ax)
+    ax.set_title('Stock Price Correlation Heatmap', fontsize=16)
+    ax.tick_params(axis='both', which='major', labelsize=10)
+    st.pyplot(fig)
+    plt.close(fig)
+
+# Calculate Monthly Returns
+def calculate_monthly_returns(df):
+    df['month'] = df['date'].dt.to_period('M')
+    monthly_returns = df.groupby(['month', 'Ticker'])['close'].apply(lambda x: (x.iloc[-1] - x.iloc[0]) / x.iloc[0])
+    monthly_returns = monthly_returns.reset_index(name='monthly_return')
+    return monthly_returns
+
+# Plot Top 5 Gainers and Losers
+def plot_monthly_gainers_losers(monthly_returns):
+    months = sorted(monthly_returns['month'].unique())
+
+    for month in months:
+        month_data = monthly_returns[monthly_returns['month'] == month]
+        top_gainers = month_data.nlargest(5, 'monthly_return')
+        top_losers = month_data.nsmallest(5, 'monthly_return')
+
+        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+        # Top Gainers
+        sns.barplot(x='Ticker', y='monthly_return', data=top_gainers, ax=axes[0], palette='Greens_d')
+        axes[0].set_title(f'Top 5 Gainers - {month}')
+        axes[0].set_ylabel('Monthly Return')
+        axes[0].set_xticklabels(axes[0].get_xticklabels(), rotation=45)
+
+        # Top Losers
+        sns.barplot(x='Ticker', y='monthly_return', data=top_losers, ax=axes[1], palette='Reds_d')
+        axes[1].set_title(f'Top 5 Losers - {month}')
+        axes[1].set_ylabel('Monthly Return')
+        axes[1].set_xticklabels(axes[1].get_xticklabels(), rotation=45)
+
+        st.pyplot(fig)
+        plt.close(fig)
+
+# Streamlit Dashboard
+st.title('Stock Market Analysis Dashboard')
+
+df_yaml = fetch_yaml_data()
+df_cleared = fetch_cleared_data()
+
+st.sidebar.header("Analysis Options")
+show_volatility = st.sidebar.checkbox("Show Volatility Analysis")
+show_cumulative_return = st.sidebar.checkbox("Show Cumulative Return Analysis")
+show_sector_performance = st.sidebar.checkbox("Show Sector Performance Analysis")
+show_correlation = st.sidebar.checkbox("Show Stock Price Correlation")
+show_monthly_gainers_losers = st.sidebar.checkbox("Show Monthly Top Gainers and Losers")
+
+if show_volatility:
+    st.subheader("Top 10 Most Volatile Stocks")
+    if not df_yaml.empty:
+        top_10_volatile = calculate_volatility(df_yaml.copy())
+        if not top_10_volatile.empty:
+            st.dataframe(top_10_volatile)
+            plot_volatility(top_10_volatile)
+        else:
+            st.warning("No sufficient data to calculate volatility.")
+    else:
+        st.warning("No YAML data available for Volatility Analysis.")
+
+if show_cumulative_return:
+    st.subheader("Cumulative Return Analysis")
+    if not df_yaml.empty:
+        cumulative_df = calculate_cumulative_return(df_yaml.copy())
+        plot_cumulative_return(cumulative_df)
+    else:
+        st.warning("No YAML data available for Cumulative Return Analysis.")
+
+if show_sector_performance:
+    st.subheader("Average Yearly Return by Sector")
+    sector_performance = calculate_sector_performance(df_cleared.copy())
+    plot_sector_performance(sector_performance)
+
+if show_correlation:
+    st.subheader("Stock Price Correlation Analysis")
+    if not df_yaml.empty:
+        correlation_matrix = calculate_stock_correlation(df_yaml.copy())
+        plot_stock_correlation_heatmap(correlation_matrix)
+    else:
+        st.warning("No YAML data available for Stock Price Correlation Analysis.")
+
+if show_monthly_gainers_losers:
+    st.subheader("Monthly Top 5 Gainers and Losers")
+    if not df_yaml.empty:
+        monthly_returns = calculate_monthly_returns(df_yaml.copy())
+        plot_monthly_gainers_losers(monthly_returns)
+    else:
+        st.warning("No YAML data available for Monthly Gainers and Losers Analysis.")
