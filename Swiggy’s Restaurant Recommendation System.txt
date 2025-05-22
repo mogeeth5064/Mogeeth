@@ -1,0 +1,58 @@
+import pandas as pd
+import re
+import numpy as np
+
+df = pd.read_csv(r"C:\Users\Mogeeth.M\Downloads\swiggy\env\swiggy.csv")
+
+# Remove duplicate rows
+df.drop_duplicates(inplace=True)
+
+# Clean 'cost' column: remove non-digit characters (like ₹, commas, spaces)
+def clean_cost(value):
+    if pd.isna(value):
+        return None
+    cleaned = re.sub(r'[^\d.]', '', str(value))
+    return cleaned if cleaned else None
+
+df['cost'] = df['cost'].apply(clean_cost)
+
+# Function to clean and convert rating_count strings like '20+ ratings', '100+ ratings', 'Too Few Ratings' to numeric
+def clean_rating_count(value):
+    if pd.isna(value):
+        return np.nan
+    value = str(value).strip().lower()
+    if 'too few' in value:
+        return np.nan  # or 0 if you prefer
+    # Extract digits from the string
+    digits = re.findall(r'\d+', value)
+    if digits:
+        return int(digits[0])
+    return np.nan
+
+df['rating_count'] = df['rating_count'].apply(clean_rating_count)
+
+# Convert columns to numeric, coercing errors (like '--' or non-numeric) to NaN
+df['cost'] = pd.to_numeric(df['cost'], errors='coerce')
+df['rating'] = pd.to_numeric(df['rating'], errors='coerce')
+df['rating_count'] = pd.to_numeric(df['rating_count'], errors='coerce')
+
+# Remove rows where rating is greater than 20 (likely invalid)
+df = df[df['rating'] <= 20]
+
+# Impute missing numeric values with median of each column
+df['cost'].fillna(df['cost'].median(), inplace=True)
+df['rating'].fillna(df['rating'].median(), inplace=True)
+df['rating_count'].fillna(df['rating_count'].median(), inplace=True)
+
+# Optional: reset index after cleaning
+df.reset_index(drop=True, inplace=True)
+
+# Verify cleaned rating_count
+print("Sample of cleaned rating_count values:")
+print(df['rating_count'].sample(10))
+
+# Save cleaned data to CSV
+cleaned_path = r"C:\Users\Mogeeth.M\Downloads\swiggy\env\cleaned_data.csv"
+df.to_csv(cleaned_path, index=False)
+
+print(f"✅ Cleaned data saved to {cleaned_path}")
