@@ -1,0 +1,115 @@
+#fantasy
+import pandas as pd
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
+import time
+import re
+import numpy as np  # Import numpy for NaN handling
+
+# Initialize WebDriver
+driver = webdriver.Chrome()
+driver.get("https://www.imdb.com/search/title/?title_type=feature&release_date=2024-01-01,2024-12-31&genres=fantasy")
+time.sleep(3)
+
+# Function to click 'Load More'
+def click_load_more():
+    try:
+        load_more_button = driver.find_element(By.XPATH, '//*[@id="__next"]/main/div[2]/div[3]/section/section/div/section/section/div[2]/div/section/div[2]/div[2]/div[2]/div/span/button/span/span')
+        ActionChains(driver).move_to_element(load_more_button).perform()
+        load_more_button.click()
+        time.sleep(3)
+        return True
+    except Exception as e:
+        print(f"Error clicking 'Load More' button:", e)
+        return False
+
+# Keep clicking 'Load More' until there are no more results
+while click_load_more():
+    print("Clicked 'Load More' button")
+
+print("No more content to load.")
+time.sleep(3)
+
+# Lists to store data
+titles = []
+ratings = []
+votings = []
+durations = []
+
+# Find all movie items
+movie_items = driver.find_elements(By.XPATH, '//*[@id="__next"]/main/div[2]/div[3]/section/section/div/section/section/div[2]/div/section/div[2]/div[2]/ul/li')
+
+# Function to convert duration to seconds
+def convert_duration_to_seconds(duration_str):
+    if duration_str:  # Check if duration_str exists
+        match = re.match(r'(?:(\d+)h)?\s*(?:(\d+)m)?', duration_str)
+        if match:
+            hours = int(match.group(1)) if match.group(1) else 0
+            minutes = int(match.group(2)) if match.group(2) else 0
+            return (hours * 3600) + (minutes * 60)
+    return None  # Return None for cases where duration isn't found or invalid
+
+# Function to convert votes
+def convert_votes(vote_str):
+    if isinstance(vote_str, str):
+        vote_str = vote_str.replace('(', '').replace(')', '')
+        if 'K' in vote_str:
+            try:  # Handle potential errors during float conversion
+                return int(float(vote_str.replace('K', '')) * 1000)
+            except ValueError:
+                return np.nan
+        elif vote_str.replace(',', '').isdigit():  # Check for digits after removing commas
+            return int(vote_str.replace(',', ''))
+        else:
+            return np.nan
+    return np.nan
+
+# Extract movie data
+for movie_item in movie_items:
+    try:
+        title = movie_item.find_element(By.XPATH, './div/div/div/div[1]/div[2]/div[1]/a/h3').text
+        rating = movie_item.find_element(By.XPATH, './div/div/div/div[1]/div[2]/span/div/span/span[1]').text
+        
+        # Extract voting count
+        try:
+            voting_element = movie_item.find_element(By.XPATH, './div/div/div/div[1]/div[2]/span/div/span/span[2]')
+            voting = voting_element.text if voting_element else None  # Check if element exists
+        except:
+            voting = None
+
+        # Extract duration
+        try:
+            duration_text = movie_item.find_element(By.XPATH, './div/div/div/div[1]/div[2]/div[2]/span[2]').text
+        except:
+            duration_text = None
+
+        duration_seconds = convert_duration_to_seconds(duration_text)
+        voting_count = convert_votes(voting) if voting else None  # Convert voting only if it exists
+
+        # Append to lists
+        titles.append(title)
+        ratings.append(rating)
+        votings.append(voting_count)  # Append the converted voting count
+        durations.append(duration_seconds)
+    
+    except Exception as e:
+        print(f"Error extracting data for a movie: {e}")
+        continue
+
+# Close the driver
+driver.quit()
+
+# Create DataFrame
+df = pd.DataFrame({
+    'Title': titles,
+    'Rating': ratings,
+    'Voting': votings,
+    'Duration_seconds': durations
+})
+
+df["Genre"]="Fantast"
+df=df.dropna()
+df.to_csv("Fantasy.csv",index=False)
+df
+
